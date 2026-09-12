@@ -274,7 +274,7 @@ class MineRepositoriesPanel extends HTMLElement {
     }
   }
 
-  async _install(id) {
+  async _install(id, version) {
     const repo = this._repositories.find((item) => String(item.id) === String(id)) || this._detail;
     if (!repo) return;
     const key = String(repo.id);
@@ -282,7 +282,13 @@ class MineRepositoriesPanel extends HTMLElement {
     this._render();
     try {
       const entityId = this._entityByRepository.get(key);
-      if (repo.installed && entityId) {
+      if (version) {
+        await this._hass.connection.sendMessagePromise({
+          type: "hacs/repository/download",
+          repository: key,
+          version,
+        });
+      } else if (repo.installed && entityId) {
         await this._hass.callService("update", "install", {}, { entity_id: entityId });
       } else {
         await this._hass.connection.sendMessagePromise({
@@ -291,7 +297,9 @@ class MineRepositoriesPanel extends HTMLElement {
           version: repo.available_version || undefined,
         });
       }
-      this._notify(repo.installed ? "Oppdateringen er lastet ned." : "Repository er installert.");
+      this._notify(version
+        ? `GitHub-versjon ${version} er lastet ned gjennom HACS.`
+        : repo.installed ? "Oppdateringen er lastet ned." : "Repository er installert.");
       await this._load();
       if (this._selected === key) await this._openDetail(key);
     } catch (error) {
@@ -480,6 +488,7 @@ class MineRepositoriesPanel extends HTMLElement {
     button.textContent = label;
     button.dataset.action = action;
     if (options.id !== undefined) button.dataset.id = options.id;
+    if (options.version !== undefined) button.dataset.version = options.version;
     if (options.className) button.className = options.className;
     button.disabled = Boolean(options.disabled);
     return button;
@@ -650,6 +659,9 @@ class MineRepositoriesPanel extends HTMLElement {
     if (repo.pending_upgrade || !repo.installed) {
       actions.append(this._button(repo.installed ? "Oppdater" : "Installer", "install", { id: repo.id, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
     }
+    if (behind) {
+      actions.append(this._button(`Installer GitHub ${github.tag}`, "install-github", { id: repo.id, version: github.tag, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
+    }
     card.append(head, description, badges, lastChecked, actions);
     return card;
   }
@@ -702,6 +714,8 @@ class MineRepositoriesPanel extends HTMLElement {
     actions.className = "detail-actions";
     actions.append(this._button("Oppdater informasjon", "refresh", { id: repo.id, className: "primary", disabled: this._busy.has(String(repo.id)) }));
     if (repo.pending_upgrade || !repo.installed) actions.append(this._button(repo.installed ? "Oppdater" : "Installer", "install", { id: repo.id, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
+    const github = this._github.get(repo.full_name);
+    if (this._hacsBehind(repo)) actions.append(this._button(`Installer GitHub ${github.tag}`, "install-github", { id: repo.id, version: github.tag, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
     actions.append(this._button("Åpne i HACS", "hacs", { id: repo.id }));
     const githubLink = document.createElement("a");
     githubLink.className = "button";
@@ -839,11 +853,12 @@ class MineRepositoriesPanel extends HTMLElement {
   _handleClick(event) {
     const target = event.target.closest("[data-action]");
     if (!target) return;
-    const { action, id } = target.dataset;
+    const { action, id, version } = target.dataset;
     if (action === "detail") this._openDetail(id);
     else if (action === "refresh") this._refreshOne(id);
     else if (action === "refresh-all") this._refreshAll();
     else if (action === "install") this._install(id);
+    else if (action === "install-github") this._install(id, version);
     else if (action === "hacs") this._navigateHacs(id);
     else if (action === "repairs") this._navigateRepairs();
     else if (action === "show-restart") { this._showRestartConfirm = true; this._render(); }

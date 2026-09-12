@@ -8,5 +8,5 @@
   "after_dependencies": ["hacs"],
   "integration_type": "service",
   "iot_class": "local_push",
-  "version": "0.4.0"
+  "version": "0.5.0"
 }

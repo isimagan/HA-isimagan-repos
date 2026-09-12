@@ -40,7 +40,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         webcomponent_name=PANEL_ELEMENT,
         sidebar_title=title,
         sidebar_icon="mdi:source-repository-multiple",
-        module_url=f"{STATIC_URL}?v=0.4.0",
+        module_url=f"{STATIC_URL}?v=0.5.0",
         config={"owner": owner, "title": title},
         require_admin=True,
     )

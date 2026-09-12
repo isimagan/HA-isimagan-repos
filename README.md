@@ -11,6 +11,8 @@ legger et enklere, filtrert grensesnitt oppå HACS.
 - Status for installert og tilgjengelig HACS-versjon
 - Direkte kontroll mot siste GitHub Release, slik at panelet kan varsle når HACS
   ennå ikke har oppdaget en ny release
+- Direkte installasjon av siste GitHub Release gjennom HACS når HACS sitt
+  versjonsregister ligger etter
 - **Oppdater informasjon** for ett repo eller alle repoer
 - Installering og oppdatering gjennom HACS/Home Assistants `update`-entiteter
 - Detaljside med README, versjoner og lenker til HACS og GitHub
@@ -51,10 +53,12 @@ Når en installert repository-oppdatering finnes, bruker panelet Home Assistants
 vanlige `update.install`-tjeneste. Hvis en update-entitet ikke finnes, faller
 panelet tilbake til HACS sin nedlastingskommando.
 
-Panelet spør i tillegg GitHubs offentlige API om siste publiserte release. Dette
-er kun en ekstra ferskhetskontroll; HACS er fortsatt ansvarlig for selve
-installasjonen. GitHub-svaret mellomlagres i nettleseren i ti minutter for å
-begrense API-kall.
+Panelet spør i tillegg GitHubs offentlige API om siste publiserte release. Når
+GitHub har en annen versjon enn HACS sitt register, vises knappen **Installer
+GitHub v…**. Den sender den eksplisitte GitHub-taggen til HACS sin egen
+nedlastingskommando, slik at HACS fortsatt står for installasjonen selv om det
+sentrale versjonsregisteret ligger etter. GitHub-svaret mellomlagres i
+nettleseren i ti minutter for å begrense API-kall.
 
 Panelet leser også Home Assistants generelle Repairs-register. Når en aktiv,
 ikke ignorert reparasjon bruker den etablerte `restart_required`-markeringen,
