@@ -38,10 +38,11 @@ Panelet vises deretter i sidepanelet. Bare repoer som HACS allerede kjenner til
 vises. Nye repoer dukker derfor opp når de blir lagt til i HACS eller HACS sitt
 standardregister.
 
-Du kan også velge **Legg til repo** direkte i panelet. Lim inn `eier/repo` eller
-en full GitHub-URL, velg repository-type og bestem om HACS skal installere repoet
-med én gang. Av hensyn til formålet med panelet godtas bare repoer fra den
-GitHub-eieren som ble valgt da integrasjonen ble satt opp.
+Du kan også velge **Legg til repo** direkte i panelet. Kopier hele repository-
+adressen fra GitHub-adresselinjen, velg **Theme**, **Template**, **Integrasjon**
+eller **Dashboard**, og bestem om HACS skal installere repoet med én gang. Av
+hensyn til formålet med panelet godtas bare repoer fra den GitHub-eieren som ble
+valgt da integrasjonen ble satt opp.
 
 ## Hvordan oppdatering virker
 

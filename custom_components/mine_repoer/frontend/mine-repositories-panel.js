@@ -94,9 +94,9 @@ const STYLE = `
 
 const CATEGORY_NAMES = {
   integration: "Integrasjon",
-  plugin: "Frontend",
-  theme: "Tema",
-  template: "Mal",
+  plugin: "Dashboard",
+  theme: "Theme",
+  template: "Template",
   python_script: "Python-skript",
   appdaemon: "AppDaemon",
 };
@@ -303,7 +303,19 @@ class MineRepositoriesPanel extends HTMLElement {
   }
 
   _normalizeRepository(value) {
-    let repository = String(value || "").trim();
+    const input = String(value || "").trim();
+    let repository = input;
+    if (/^https?:\/\//i.test(input)) {
+      try {
+        const url = new URL(input);
+        if (!["github.com", "www.github.com"].includes(url.hostname.toLowerCase())) return undefined;
+        const segments = url.pathname.split("/").filter(Boolean);
+        if (segments.length < 2) return undefined;
+        repository = `${segments[0]}/${segments[1]}`;
+      } catch {
+        return undefined;
+      }
+    }
     repository = repository.replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
     repository = repository.replace(/^github\.com\//i, "");
     repository = repository.replace(/\.git\/?$/i, "").replace(/\/$/, "");
@@ -332,7 +344,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._addError = undefined;
 
     if (!fullName) {
-      this._addError = "Bruk formatet eier/repo eller en full GitHub-URL.";
+      this._addError = "Lim inn en full GitHub-adresse, for eksempel https://github.com/eier/repo.";
       this._render();
       return;
     }
@@ -550,7 +562,7 @@ class MineRepositoriesPanel extends HTMLElement {
 
     const filters = document.createElement("nav");
     filters.className = "filters";
-    for (const [key, label] of [["all", "Alle"], ["updates", "Oppdateringer"], ["integration", "Integrasjoner"], ["plugin", "Frontend"]]) {
+    for (const [key, label] of [["all", "Alle"], ["updates", "Oppdateringer"], ["integration", "Integrasjoner"], ["plugin", "Dashboard"]]) {
       filters.append(this._button(label, "filter", { id: key, className: this._filter === key ? "active" : "" }));
     }
     page.append(filters);
@@ -738,13 +750,14 @@ class MineRepositoriesPanel extends HTMLElement {
 
     const repoLabel = document.createElement("label");
     repoLabel.className = "field";
-    repoLabel.textContent = "GitHub-repository";
+    repoLabel.textContent = "Full GitHub-adresse";
     const repoInput = document.createElement("input");
+    repoInput.type = "url";
     repoInput.name = "repository";
     repoInput.required = true;
     repoInput.autocomplete = "off";
-    repoInput.placeholder = `${this._config.owner || "isimagan"}/repo-navn`;
-    repoInput.value = this._addDraft?.repository || `${this._config.owner || "isimagan"}/`;
+    repoInput.placeholder = `https://github.com/${this._config.owner || "isimagan"}/repo-navn`;
+    repoInput.value = this._addDraft?.repository || "";
     repoLabel.append(repoInput);
 
     const categoryLabel = document.createElement("label");
@@ -752,7 +765,7 @@ class MineRepositoriesPanel extends HTMLElement {
     categoryLabel.textContent = "Repository-type";
     const select = document.createElement("select");
     select.name = "category";
-    for (const [value, label] of [["integration", "Integrasjon"], ["plugin", "Frontend"], ["theme", "Tema"], ["template", "Mal"], ["python_script", "Python-skript"], ["appdaemon", "AppDaemon"]]) {
+    for (const [value, label] of [["theme", "Theme"], ["template", "Template"], ["integration", "Integrasjon"], ["plugin", "Dashboard"]]) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
