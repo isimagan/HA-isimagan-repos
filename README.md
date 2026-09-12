@@ -62,6 +62,12 @@ nedlastingskommando, slik at HACS fortsatt står for installasjonen selv om det
 sentrale versjonsregisteret ligger etter. GitHub-svaret mellomlagres i
 nettleseren i ti minutter for å begrense API-kall.
 
+Oversikten over andre repoer lagres også i nettleseren. En full sideoppdatering
+gjenbruker derfor siste vellykkede svar i stedet for å bruke GitHubs anonyme
+API-kvote på nytt. Hvis GitHub svarer med en ratebegrensning, beholdes sist
+kjente data; standardoppsettet for `isimagan` har i tillegg en lokal
+reserveoversikt for de fire øvrige repoene.
+
 Panelet leser også Home Assistants generelle Repairs-register. Når en aktiv,
 ikke ignorert reparasjon bruker den etablerte `restart_required`-markeringen,
 vises et varsel med lenke til Reparasjoner og en knapp for å starte Home

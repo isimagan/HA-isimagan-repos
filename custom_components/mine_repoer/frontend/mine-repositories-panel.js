@@ -115,6 +115,18 @@ const CATEGORY_NAMES = {
   appdaemon: "AppDaemon",
 };
 
+const ISIMAGAN_REPOSITORY_FALLBACK = [
+  { name: "HA-Holiday-sensors", full_name: "isimagan/HA-Holiday-sensors", html_url: "https://github.com/isimagan/HA-Holiday-sensors", size: 43, archived: false, disabled: false },
+  { name: "HA-Roborock-Add-on", full_name: "isimagan/HA-Roborock-Add-on", html_url: "https://github.com/isimagan/HA-Roborock-Add-on", size: 0, archived: false, disabled: false },
+  { name: "isimagan.github.io", full_name: "isimagan/isimagan.github.io", html_url: "https://github.com/isimagan/isimagan.github.io", size: 758, archived: false, disabled: false },
+  { name: "JS-Entities-Row", full_name: "isimagan/JS-Entities-Row", html_url: "https://github.com/isimagan/JS-Entities-Row", size: 44, archived: false, disabled: false },
+];
+
+const ISIMAGAN_CONTENT_FALLBACK = {
+  "isimagan/ha-holiday-sensors": ["plan"],
+  "isimagan/js-entities-row": ["readme.md", "plan.md"],
+};
+
 class MineRepositoriesPanel extends HTMLElement {
   constructor() {
     super();
@@ -129,6 +141,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._githubRepositoriesError = undefined;
     this._githubRepositoriesFetchedAt = 0;
     this._githubRepositoryContents = new Map();
+    this._githubCacheRestored = false;
     this._entityByRepository = new Map();
     this._checkedAt = new Map();
     this._selected = undefined;
@@ -204,11 +217,58 @@ class MineRepositoriesPanel extends HTMLElement {
   }
 
   async _loadGithubData(force = false) {
+    this._restoreGithubCache();
+    this._applyGithubFallback();
     await this._loadGithubRepositories(force);
     await Promise.all([
       this._loadGithubRepositoryContents(force),
       this._loadGithubReleases(force),
     ]);
+    this._saveGithubCache();
+  }
+
+  _githubCacheKey() {
+    return `mine_repoer.github.v1.${String(this._config.owner || "isimagan").toLowerCase()}`;
+  }
+
+  _restoreGithubCache() {
+    if (this._githubCacheRestored) return;
+    this._githubCacheRestored = true;
+    try {
+      const cached = JSON.parse(localStorage.getItem(this._githubCacheKey()) || "null");
+      if (!cached || !Array.isArray(cached.repositories)) return;
+      this._githubRepositories = cached.repositories;
+      this._githubRepositoriesLoaded = true;
+      this._githubRepositoriesFetchedAt = Number(cached.fetchedAt) || 0;
+      for (const [key, value] of Object.entries(cached.contents || {})) this._githubRepositoryContents.set(key, value);
+      for (const [key, value] of Object.entries(cached.releases || {})) this._github.set(key, value);
+    } catch {
+      // Ignore corrupt or unavailable browser storage and continue with live data.
+    }
+  }
+
+  _applyGithubFallback() {
+    if (String(this._config.owner || "isimagan").toLowerCase() !== "isimagan") return;
+    if (!this._githubRepositories.length) {
+      this._githubRepositories = ISIMAGAN_REPOSITORY_FALLBACK.map((repo) => ({ ...repo }));
+      this._githubRepositoriesLoaded = true;
+    }
+    for (const [key, names] of Object.entries(ISIMAGAN_CONTENT_FALLBACK)) {
+      if (!this._githubRepositoryContents.has(key)) this._githubRepositoryContents.set(key, { names, fetchedAt: 0 });
+    }
+  }
+
+  _saveGithubCache() {
+    try {
+      localStorage.setItem(this._githubCacheKey(), JSON.stringify({
+        fetchedAt: this._githubRepositoriesFetchedAt,
+        repositories: this._githubRepositories,
+        contents: Object.fromEntries(this._githubRepositoryContents),
+        releases: Object.fromEntries(this._github),
+      }));
+    } catch {
+      // The in-memory cache still works when browser storage is unavailable.
+    }
   }
 
   async _loadGithubRepositories(force = false) {
@@ -226,10 +286,10 @@ class MineRepositoriesPanel extends HTMLElement {
       this._githubRepositories = await response.json();
       this._githubRepositoriesError = undefined;
     } catch (error) {
-      this._githubRepositoriesError = this._friendlyError(error);
+      if (!this._githubRepositories.length) this._githubRepositoriesError = this._friendlyError(error);
     } finally {
       this._githubRepositoriesLoaded = true;
-      this._githubRepositoriesFetchedAt = now;
+      if (!this._githubRepositoriesError) this._githubRepositoriesFetchedAt = now;
       this._render();
     }
   }
@@ -256,7 +316,10 @@ class MineRepositoriesPanel extends HTMLElement {
           fetchedAt: now,
         });
       } catch (error) {
-        this._githubRepositoryContents.set(key, { error: this._friendlyError(error), fetchedAt: now });
+        const existing = this._githubRepositoryContents.get(key);
+        this._githubRepositoryContents.set(key, existing
+          ? { ...existing, fetchedAt: now, stale: true }
+          : { error: this._friendlyError(error), fetchedAt: now });
       }
     }));
     this._render();
@@ -265,7 +328,7 @@ class MineRepositoriesPanel extends HTMLElement {
   async _loadGithubReleases(force = false) {
     const now = Date.now();
     const repositories = new Map();
-    [...this._repositories, ...this._githubRepositories].forEach((repo) => repositories.set(String(repo.full_name).toLowerCase(), repo));
+    this._repositories.forEach((repo) => repositories.set(String(repo.full_name).toLowerCase(), repo));
     await Promise.allSettled([...repositories.values()].map(async (repo) => {
       const cached = this._github.get(repo.full_name);
       if (!force && cached && now - cached.fetchedAt < 10 * 60 * 1000) return;
