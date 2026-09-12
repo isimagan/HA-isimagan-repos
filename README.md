@@ -15,6 +15,7 @@ legger et enklere, filtrert grensesnitt oppå HACS.
 - Installering og oppdatering gjennom HACS/Home Assistants `update`-entiteter
 - Detaljside med README, versjoner og lenker til HACS og GitHub
 - Filtre for oppdateringer, integrasjoner og frontend-repoer
+- Registrering av tilpassede repoer i HACS, med valgfri direkte installasjon
 
 ## Krav
 
@@ -35,6 +36,11 @@ legger et enklere, filtrert grensesnitt oppå HACS.
 Panelet vises deretter i sidepanelet. Bare repoer som HACS allerede kjenner til
 vises. Nye repoer dukker derfor opp når de blir lagt til i HACS eller HACS sitt
 standardregister.
+
+Du kan også velge **Legg til repo** direkte i panelet. Lim inn `eier/repo` eller
+en full GitHub-URL, velg repository-type og bestem om HACS skal installere repoet
+med én gang. Av hensyn til formålet med panelet godtas bare repoer fra den
+GitHub-eieren som ble valgt da integrasjonen ble satt opp.
 
 ## Hvordan oppdatering virker
 

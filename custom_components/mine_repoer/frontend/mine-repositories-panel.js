@@ -63,6 +63,16 @@ const STYLE = `
   .readme ha-markdown { display: block; overflow-wrap: anywhere; }
   .spinner { width: 34px; height: 34px; border: 3px solid var(--divider-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin .8s linear infinite; margin: 60px auto; }
   .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 10; color: var(--text-primary-color, #fff); background: var(--primary-text-color); border-radius: 9px; padding: 12px 18px; box-shadow: 0 5px 24px #0005; max-width: min(520px, calc(100vw - 32px)); }
+  .scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: #0008; }
+  .dialog { width: min(500px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: var(--card-background-color); border-radius: 16px; box-shadow: 0 12px 48px #0007; padding: 24px; }
+  .dialog h2 { margin-bottom: 8px; }
+  .dialog p { margin: 0 0 20px; line-height: 1.45; }
+  .field { display: grid; gap: 7px; margin: 0 0 16px; font-size: 14px; font-weight: 600; }
+  .field input, .field select { width: 100%; min-height: 46px; padding: 10px 12px; color: var(--primary-text-color); background: var(--primary-background-color); border: 1px solid var(--divider-color); border-radius: 9px; font: inherit; }
+  .checkbox { display: flex; gap: 10px; align-items: center; margin: 2px 0 18px; font-size: 14px; }
+  .checkbox input { width: 18px; height: 18px; accent-color: var(--primary-color); }
+  .form-error { color: var(--error-color); background: color-mix(in srgb, var(--error-color) 12%, transparent); border-radius: 8px; padding: 10px 12px; margin: 0 0 16px; font-size: 14px; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 760px) {
     .page { padding: 20px 12px 54px; }
@@ -90,6 +100,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._hass = undefined;
     this._panel = undefined;
     this._repositories = [];
+    this._allRepositories = [];
     this._github = new Map();
     this._entityByRepository = new Map();
     this._checkedAt = new Map();
@@ -101,6 +112,10 @@ class MineRepositoriesPanel extends HTMLElement {
     this._error = undefined;
     this._toast = undefined;
     this._refreshProgress = undefined;
+    this._showAdd = false;
+    this._addBusy = false;
+    this._addError = undefined;
+    this._addDraft = undefined;
   }
 
   set hass(value) {
@@ -138,6 +153,7 @@ class MineRepositoriesPanel extends HTMLElement {
         this._hass.callWS({ type: "config/entity_registry/list" }).catch(() => []),
       ]);
       const owner = String(this._config.owner || "isimagan").toLowerCase();
+      this._allRepositories = repositories;
       this._repositories = repositories
         .filter((repo) => String(repo.full_name || "").split("/")[0].toLowerCase() === owner)
         .sort((a, b) => Number(b.pending_upgrade) - Number(a.pending_upgrade) || a.name.localeCompare(b.name, "nb"));
@@ -273,6 +289,91 @@ class MineRepositoriesPanel extends HTMLElement {
     }
   }
 
+  _normalizeRepository(value) {
+    let repository = String(value || "").trim();
+    repository = repository.replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
+    repository = repository.replace(/^github\.com\//i, "");
+    repository = repository.replace(/\.git\/?$/i, "").replace(/\/$/, "");
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return undefined;
+    return repository;
+  }
+
+  async _waitForRepository(fullName) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const repositories = await this._hass.connection.sendMessagePromise({ type: "hacs/repositories/list" });
+      const match = repositories.find((repo) => String(repo.full_name).toLowerCase() === fullName.toLowerCase());
+      if (match) return match;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return undefined;
+  }
+
+  async _addRepository(form) {
+    if (this._addBusy) return;
+    const data = new FormData(form);
+    const fullName = this._normalizeRepository(data.get("repository"));
+    const category = String(data.get("category") || "integration");
+    const install = data.get("install") === "on";
+    const configuredOwner = String(this._config.owner || "isimagan");
+    this._addDraft = { repository: String(data.get("repository") || ""), category, install };
+    this._addError = undefined;
+
+    if (!fullName) {
+      this._addError = "Bruk formatet eier/repo eller en full GitHub-URL.";
+      this._render();
+      return;
+    }
+    if (fullName.split("/")[0].toLowerCase() !== configuredOwner.toLowerCase()) {
+      this._addError = `Dette panelet viser bare repoer fra ${configuredOwner}.`;
+      this._render();
+      return;
+    }
+
+    this._addBusy = true;
+    this._render();
+    try {
+      let repository = this._allRepositories.find((repo) => String(repo.full_name).toLowerCase() === fullName.toLowerCase());
+      const wasExisting = Boolean(repository);
+      if (!repository) {
+        await this._hass.connection.sendMessagePromise({
+          type: "hacs/repositories/add",
+          repository: fullName,
+          category,
+        });
+        repository = await this._waitForRepository(fullName);
+        if (!repository) {
+          throw new Error("HACS registrerte ikke repoet. Kontroller URL, repository-type og HACS-loggen.");
+        }
+      }
+
+      if (install && !repository.installed) {
+        if (!repository.can_download) {
+          throw new Error("HACS registrerte repoet, men det kan ikke lastes ned ennå.");
+        }
+        await this._hass.connection.sendMessagePromise({
+          type: "hacs/repository/download",
+          repository: String(repository.id),
+        });
+      }
+
+      this._showAdd = false;
+      this._addDraft = undefined;
+      await this._load({ refreshGithub: true });
+      this._notify(
+        install && !repository.installed
+          ? `${fullName} er lagt til og installert.`
+          : wasExisting
+            ? `${fullName} finnes allerede i HACS.`
+            : `${fullName} er lagt til i HACS.`,
+      );
+    } catch (error) {
+      this._addError = this._friendlyError(error);
+    } finally {
+      this._addBusy = false;
+      this._render();
+    }
+  }
+
   _navigateHacs(id) {
     history.pushState(null, "", `/hacs/repository/${id}`);
     window.dispatchEvent(new CustomEvent("location-changed"));
@@ -319,6 +420,7 @@ class MineRepositoriesPanel extends HTMLElement {
 
   _button(label, action, options = {}) {
     const button = document.createElement("button");
+    button.type = "button";
     button.textContent = label;
     button.dataset.action = action;
     if (options.id !== undefined) button.dataset.id = options.id;
@@ -353,7 +455,14 @@ class MineRepositoriesPanel extends HTMLElement {
       toast.textContent = this._toast;
       page.append(toast);
     }
+    if (this._showAdd) page.append(this._renderAddDialog());
     page.addEventListener("click", (event) => this._handleClick(event));
+    page.addEventListener("submit", (event) => {
+      if (event.target.matches("form[data-add-repository]")) {
+        event.preventDefault();
+        this._addRepository(event.target);
+      }
+    });
     this.shadowRoot.append(page);
   }
 
@@ -371,6 +480,7 @@ class MineRepositoriesPanel extends HTMLElement {
     intro.append(title, summary);
     const actions = document.createElement("div");
     actions.className = "actions";
+    actions.append(this._button("Legg til repo", "show-add", { className: "tonal" }));
     actions.append(this._button(this._busy.has("all") ? "Oppdaterer …" : "Oppdater informasjon for alle", "refresh-all", { className: "primary", disabled: this._busy.has("all") || !this._repositories.length }));
     hero.append(intro, actions);
     page.append(hero);
@@ -536,6 +646,90 @@ class MineRepositoriesPanel extends HTMLElement {
     page.append(grid);
   }
 
+  _renderAddDialog() {
+    const scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.addEventListener("click", (event) => {
+      if (event.target === scrim && !this._addBusy) {
+        this._showAdd = false;
+        this._addError = undefined;
+        this._addDraft = undefined;
+        this._render();
+      }
+    });
+    const dialog = document.createElement("section");
+    dialog.className = "dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "add-repository-title");
+    const title = document.createElement("h2");
+    title.id = "add-repository-title";
+    title.textContent = "Legg til repo i HACS";
+    const description = document.createElement("p");
+    description.className = "muted";
+    description.textContent = `Registrer et tilpasset repo fra ${this._config.owner || "isimagan"}, og installer det med én gang hvis du ønsker.`;
+    const form = document.createElement("form");
+    form.dataset.addRepository = "";
+
+    const repoLabel = document.createElement("label");
+    repoLabel.className = "field";
+    repoLabel.textContent = "GitHub-repository";
+    const repoInput = document.createElement("input");
+    repoInput.name = "repository";
+    repoInput.required = true;
+    repoInput.autocomplete = "off";
+    repoInput.placeholder = `${this._config.owner || "isimagan"}/repo-navn`;
+    repoInput.value = this._addDraft?.repository || `${this._config.owner || "isimagan"}/`;
+    repoLabel.append(repoInput);
+
+    const categoryLabel = document.createElement("label");
+    categoryLabel.className = "field";
+    categoryLabel.textContent = "Repository-type";
+    const select = document.createElement("select");
+    select.name = "category";
+    for (const [value, label] of [["integration", "Integrasjon"], ["plugin", "Frontend"], ["theme", "Tema"], ["template", "Mal"], ["python_script", "Python-skript"], ["appdaemon", "AppDaemon"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = (this._addDraft?.category || "integration") === value;
+      select.append(option);
+    }
+    categoryLabel.append(select);
+
+    const installLabel = document.createElement("label");
+    installLabel.className = "checkbox";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.name = "install";
+    checkbox.checked = this._addDraft?.install ?? true;
+    const checkboxText = document.createElement("span");
+    checkboxText.textContent = "Installer repoet etter registrering";
+    installLabel.append(checkbox, checkboxText);
+
+    form.append(repoLabel, categoryLabel, installLabel);
+    if (this._addError) {
+      const error = document.createElement("div");
+      error.className = "form-error";
+      error.setAttribute("role", "alert");
+      error.textContent = this._addError;
+      form.append(error);
+    }
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    actions.append(this._button("Avbryt", "dismiss-add", { disabled: this._addBusy }));
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "primary";
+    submit.disabled = this._addBusy;
+    submit.textContent = this._addBusy ? "Arbeider …" : "Legg til";
+    actions.append(submit);
+    form.append(actions);
+    dialog.append(title, description, form);
+    scrim.append(dialog);
+    queueMicrotask(() => repoInput.focus());
+    return scrim;
+  }
+
   _handleClick(event) {
     const target = event.target.closest("[data-action]");
     if (!target) return;
@@ -546,6 +740,8 @@ class MineRepositoriesPanel extends HTMLElement {
     else if (action === "install") this._install(id);
     else if (action === "hacs") this._navigateHacs(id);
     else if (action === "reload") this._load();
+    else if (action === "show-add") { this._showAdd = true; this._addError = undefined; this._addDraft = undefined; this._render(); }
+    else if (action === "dismiss-add" && !this._addBusy) { this._showAdd = false; this._addError = undefined; this._addDraft = undefined; this._render(); }
     else if (action === "back") { this._selected = undefined; this._detail = undefined; this._render(); }
     else if (action === "filter") { this._filter = id; this._render(); }
   }
