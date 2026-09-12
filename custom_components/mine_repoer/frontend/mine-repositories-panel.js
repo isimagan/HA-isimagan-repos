@@ -13,7 +13,7 @@ const STYLE = `
   h2 { margin: 0; font-size: 22px; }
   .muted { color: var(--secondary-text-color); }
   .summary { margin: 0; font-size: 15px; }
-  .actions, .filters, .card-actions, .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions, .card-actions, .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   button, a.button {
     appearance: none; border: 0; border-radius: 10px; padding: 10px 14px;
     min-height: 40px; font: inherit; font-weight: 600; cursor: pointer;
@@ -23,10 +23,8 @@ const STYLE = `
   button.primary { color: var(--text-primary-color, #fff); background: var(--primary-color); }
   button.tonal { color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
   button.ghost { background: transparent; }
+  button.icon-button { width: 40px; padding: 0; flex: 0 0 40px; }
   button:disabled { opacity: .55; cursor: wait; }
-  .filters { margin: 0 0 18px; }
-  .filters button { min-height: 34px; padding: 7px 12px; border-radius: 18px; font-size: 14px; }
-  .filters button.active { background: var(--primary-color); color: var(--text-primary-color, #fff); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
   .repo-card {
     background: var(--card-background-color); border-radius: var(--ha-card-border-radius, 12px);
@@ -133,7 +131,6 @@ class MineRepositoriesPanel extends HTMLElement {
     this._githubRepositoryContents = new Map();
     this._entityByRepository = new Map();
     this._checkedAt = new Map();
-    this._filter = "all";
     this._selected = undefined;
     this._detail = undefined;
     this._loading = true;
@@ -540,13 +537,6 @@ class MineRepositoriesPanel extends HTMLElement {
     return text;
   }
 
-  _filteredRepositories() {
-    if (this._filter === "updates") return this._repositories.filter((repo) => repo.pending_upgrade || this._hacsBehind(repo));
-    if (this._filter === "integration") return this._repositories.filter((repo) => repo.category === "integration");
-    if (this._filter === "plugin") return this._repositories.filter((repo) => repo.category === "plugin");
-    return this._repositories;
-  }
-
   _hacsBehind(repo) {
     const github = this._github.get(repo.full_name);
     if (!github?.tag || !repo.available_version) return false;
@@ -604,6 +594,16 @@ class MineRepositoriesPanel extends HTMLElement {
     return button;
   }
 
+  _iconButton(iconName, action, label) {
+    const button = this._button("", action, { className: "icon-button" });
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", iconName);
+    button.append(icon);
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    return button;
+  }
+
   _badge(text, type = "") {
     const span = document.createElement("span");
     span.className = `badge ${type}`;
@@ -658,6 +658,7 @@ class MineRepositoriesPanel extends HTMLElement {
     actions.className = "actions";
     actions.append(this._button("Legg til repo", "show-add", { className: "tonal" }));
     actions.append(this._button(this._busy.has("all") ? "Oppdaterer …" : "Oppdater informasjon for alle", "refresh-all", { className: "primary", disabled: this._busy.has("all") || !this._repositories.length }));
+    actions.append(this._iconButton("mdi:refresh", "reload-page", "Last siden på nytt"));
     hero.append(intro, actions);
     page.append(hero);
 
@@ -679,14 +680,7 @@ class MineRepositoriesPanel extends HTMLElement {
       return;
     }
 
-    const filters = document.createElement("nav");
-    filters.className = "filters";
-    for (const [key, label] of [["all", "Alle"], ["updates", "Oppdateringer"], ["integration", "Integrasjoner"], ["plugin", "Dashboard"]]) {
-      filters.append(this._button(label, "filter", { id: key, className: this._filter === key ? "active" : "" }));
-    }
-    page.append(filters);
-
-    const repositories = this._filteredRepositories();
+    const repositories = this._repositories;
     if (!repositories.length) {
       const empty = document.createElement("div");
       empty.className = "empty";
@@ -1045,6 +1039,7 @@ class MineRepositoriesPanel extends HTMLElement {
     if (action === "detail") this._openDetail(id);
     else if (action === "refresh") this._refreshOne(id);
     else if (action === "refresh-all") this._refreshAll();
+    else if (action === "reload-page") window.location.reload();
     else if (action === "install") this._install(id);
     else if (action === "install-github") this._install(id, version);
     else if (action === "hacs") this._navigateHacs(id);
@@ -1056,7 +1051,6 @@ class MineRepositoriesPanel extends HTMLElement {
     else if (action === "show-add") { this._showAdd = true; this._addError = undefined; this._addDraft = undefined; this._render(); }
     else if (action === "dismiss-add" && !this._addBusy) { this._showAdd = false; this._addError = undefined; this._addDraft = undefined; this._render(); }
     else if (action === "back") { this._selected = undefined; this._detail = undefined; this._render(); }
-    else if (action === "filter") { this._filter = id; this._render(); }
   }
 }
 
