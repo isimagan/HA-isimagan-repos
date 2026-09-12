@@ -51,6 +51,12 @@ const STYLE = `
   .error ha-icon { color: var(--error-color); }
   .progress { height: 3px; overflow: hidden; background: var(--divider-color); margin: -10px 0 20px; border-radius: 3px; }
   .progress span { display: block; height: 100%; background: var(--primary-color); transition: width .2s ease; }
+  .restart-banner { display: flex; gap: 16px; align-items: center; margin: 0 0 22px; padding: 16px 18px; color: var(--primary-text-color); background: color-mix(in srgb, var(--warning-color, #ff9800) 14%, var(--card-background-color)); border: 1px solid color-mix(in srgb, var(--warning-color, #ff9800) 55%, var(--divider-color)); border-radius: 12px; }
+  .restart-banner > ha-icon { color: var(--warning-color, #ff9800); flex: 0 0 auto; }
+  .restart-copy { flex: 1; min-width: 0; }
+  .restart-copy strong { display: block; margin-bottom: 3px; }
+  .restart-copy span { font-size: 14px; color: var(--secondary-text-color); }
+  .restart-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .detail-top { display: flex; gap: 14px; align-items: center; margin-bottom: 20px; }
   .detail-title { flex: 1; min-width: 0; }
   .detail-title h1 { overflow-wrap: anywhere; }
@@ -81,6 +87,8 @@ const STYLE = `
     .grid { grid-template-columns: 1fr; }
     .detail-grid { grid-template-columns: 1fr; }
     .detail-top { align-items: flex-start; }
+    .restart-banner { align-items: flex-start; flex-wrap: wrap; }
+    .restart-actions { width: 100%; }
   }
 `;
 
@@ -112,6 +120,9 @@ class MineRepositoriesPanel extends HTMLElement {
     this._error = undefined;
     this._toast = undefined;
     this._refreshProgress = undefined;
+    this._restartIssues = [];
+    this._restartBusy = false;
+    this._showRestartConfirm = false;
     this._showAdd = false;
     this._addBusy = false;
     this._addError = undefined;
@@ -148,9 +159,10 @@ class MineRepositoriesPanel extends HTMLElement {
     this._error = undefined;
     this._render();
     try {
-      const [repositories, registry] = await Promise.all([
+      const [repositories, registry, repairs] = await Promise.all([
         this._hass.connection.sendMessagePromise({ type: "hacs/repositories/list" }),
         this._hass.callWS({ type: "config/entity_registry/list" }).catch(() => []),
+        this._hass.connection.sendMessagePromise({ type: "repairs/list_issues" }).catch(() => ({ issues: [] })),
       ]);
       const owner = String(this._config.owner || "isimagan").toLowerCase();
       this._allRepositories = repositories;
@@ -162,6 +174,7 @@ class MineRepositoriesPanel extends HTMLElement {
           .filter((entry) => entry.platform === "hacs" && entry.entity_id?.startsWith("update."))
           .map((entry) => [String(entry.unique_id), entry.entity_id]),
       );
+      this._restartIssues = (repairs.issues || []).filter((issue) => this._isRestartRequiredIssue(issue));
       this._loading = false;
       this._render();
       await this._loadGithubReleases(refreshGithub);
@@ -374,6 +387,37 @@ class MineRepositoriesPanel extends HTMLElement {
     }
   }
 
+  _isRestartRequiredIssue(issue) {
+    if (issue.ignored) return false;
+    const fields = [issue.issue_id, issue.translation_key]
+      .filter(Boolean)
+      .map((value) => String(value).toLowerCase());
+    return fields.some((value) => /(?:^|[_-])restart[_-]?required(?:[_-]|$)/.test(value)
+      || /(?:^|[_-])required[_-]?restart(?:[_-]|$)/.test(value)
+      || /(?:^|[_-])home[_-]?assistant[_-]?restart(?:[_-]|$)/.test(value));
+  }
+
+  async _restartHomeAssistant() {
+    if (this._restartBusy) return;
+    this._restartBusy = true;
+    this._render();
+    try {
+      await this._hass.callService("homeassistant", "restart");
+      this._showRestartConfirm = false;
+      this._notify("Omstart av Home Assistant er startet.");
+    } catch (error) {
+      this._notify(`Kunne ikke starte Home Assistant på nytt: ${this._friendlyError(error)}`);
+    } finally {
+      this._restartBusy = false;
+      this._render();
+    }
+  }
+
+  _navigateRepairs() {
+    history.pushState(null, "", "/config/repairs");
+    window.dispatchEvent(new CustomEvent("location-changed"));
+  }
+
   _navigateHacs(id) {
     history.pushState(null, "", `/hacs/repository/${id}`);
     window.dispatchEvent(new CustomEvent("location-changed"));
@@ -443,10 +487,10 @@ class MineRepositoriesPanel extends HTMLElement {
     page.className = "page";
     if (this._loading) {
       page.innerHTML = '<div class="spinner" aria-label="Laster"></div>';
-    } else if (this._selected) {
-      this._renderDetail(page);
     } else {
-      this._renderOverview(page);
+      if (this._restartIssues.length) page.append(this._renderRestartBanner());
+      if (this._selected) this._renderDetail(page);
+      else this._renderOverview(page);
     }
     if (this._toast) {
       const toast = document.createElement("div");
@@ -456,6 +500,7 @@ class MineRepositoriesPanel extends HTMLElement {
       page.append(toast);
     }
     if (this._showAdd) page.append(this._renderAddDialog());
+    if (this._showRestartConfirm) page.append(this._renderRestartDialog());
     page.addEventListener("click", (event) => this._handleClick(event));
     page.addEventListener("submit", (event) => {
       if (event.target.matches("form[data-add-repository]")) {
@@ -524,6 +569,26 @@ class MineRepositoriesPanel extends HTMLElement {
     grid.className = "grid";
     repositories.forEach((repo) => grid.append(this._renderRepositoryCard(repo)));
     page.append(grid);
+  }
+
+  _renderRestartBanner() {
+    const banner = document.createElement("section");
+    banner.className = "restart-banner";
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:restart-alert");
+    const copy = document.createElement("div");
+    copy.className = "restart-copy";
+    const title = document.createElement("strong");
+    title.textContent = "Home Assistant må startes på nytt";
+    const detail = document.createElement("span");
+    detail.textContent = `${this._restartIssues.length} aktiv ${this._restartIssues.length === 1 ? "reparasjon krever" : "reparasjoner krever"} omstart.`;
+    copy.append(title, detail);
+    const actions = document.createElement("div");
+    actions.className = "restart-actions";
+    actions.append(this._button("Se reparasjoner", "repairs"));
+    actions.append(this._button("Start på nytt", "show-restart", { className: "primary" }));
+    banner.append(icon, copy, actions);
+    return banner;
   }
 
   _renderRepositoryCard(repo) {
@@ -730,6 +795,34 @@ class MineRepositoriesPanel extends HTMLElement {
     return scrim;
   }
 
+  _renderRestartDialog() {
+    const scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.addEventListener("click", (event) => {
+      if (event.target === scrim && !this._restartBusy) {
+        this._showRestartConfirm = false;
+        this._render();
+      }
+    });
+    const dialog = document.createElement("section");
+    dialog.className = "dialog";
+    dialog.setAttribute("role", "alertdialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "restart-title");
+    const title = document.createElement("h2");
+    title.id = "restart-title";
+    title.textContent = "Starte Home Assistant på nytt?";
+    const description = document.createElement("p");
+    description.textContent = "Home Assistant vil være utilgjengelig en kort stund. Automatiseringer og tilkoblinger kan bli midlertidig avbrutt.";
+    const actions = document.createElement("div");
+    actions.className = "dialog-actions";
+    actions.append(this._button("Avbryt", "dismiss-restart", { disabled: this._restartBusy }));
+    actions.append(this._button(this._restartBusy ? "Starter på nytt …" : "Start på nytt", "restart", { className: "primary", disabled: this._restartBusy }));
+    dialog.append(title, description, actions);
+    scrim.append(dialog);
+    return scrim;
+  }
+
   _handleClick(event) {
     const target = event.target.closest("[data-action]");
     if (!target) return;
@@ -739,6 +832,10 @@ class MineRepositoriesPanel extends HTMLElement {
     else if (action === "refresh-all") this._refreshAll();
     else if (action === "install") this._install(id);
     else if (action === "hacs") this._navigateHacs(id);
+    else if (action === "repairs") this._navigateRepairs();
+    else if (action === "show-restart") { this._showRestartConfirm = true; this._render(); }
+    else if (action === "dismiss-restart" && !this._restartBusy) { this._showRestartConfirm = false; this._render(); }
+    else if (action === "restart") this._restartHomeAssistant();
     else if (action === "reload") this._load();
     else if (action === "show-add") { this._showAdd = true; this._addError = undefined; this._addDraft = undefined; this._render(); }
     else if (action === "dismiss-add" && !this._addBusy) { this._showAdd = false; this._addError = undefined; this._addDraft = undefined; this._render(); }

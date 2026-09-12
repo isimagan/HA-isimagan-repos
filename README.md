@@ -16,6 +16,7 @@ legger et enklere, filtrert grensesnitt oppå HACS.
 - Detaljside med README, versjoner og lenker til HACS og GitHub
 - Filtre for oppdateringer, integrasjoner og frontend-repoer
 - Registrering av tilpassede repoer i HACS, med valgfri direkte installasjon
+- Generelt varsel og omstartsknapp når Home Assistant Repairs melder at omstart kreves
 
 ## Krav
 
@@ -53,6 +54,11 @@ Panelet spør i tillegg GitHubs offentlige API om siste publiserte release. Dett
 er kun en ekstra ferskhetskontroll; HACS er fortsatt ansvarlig for selve
 installasjonen. GitHub-svaret mellomlagres i nettleseren i ti minutter for å
 begrense API-kall.
+
+Panelet leser også Home Assistants generelle Repairs-register. Når en aktiv,
+ikke ignorert reparasjon bruker den etablerte `restart_required`-markeringen,
+vises et varsel med lenke til Reparasjoner og en knapp for å starte Home
+Assistant på nytt. Omstart krever alltid en ekstra bekreftelse.
 
 ## Utvikling
 
