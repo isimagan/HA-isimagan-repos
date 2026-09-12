@@ -1,0 +1,17 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Mine repoer er allerede konfigurert."
+    },
+    "step": {
+      "user": {
+        "title": "Sett opp Mine repoer",
+        "description": "Viser repoene HACS kjenner til fra denne GitHub-eieren.",
+        "data": {
+          "owner": "GitHub-eier",
+          "title": "Tittel i sidepanelet"
+        }
+      }
+    }
+  }
+}

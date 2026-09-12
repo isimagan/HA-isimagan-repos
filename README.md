@@ -1,0 +1,59 @@
+# Mine repoer
+
+Et privat utviklerpanel for Home Assistant som viser bare repoene dine i HACS.
+HACS fortsetter å håndtere installasjon, versjoner og oppdateringer; integrasjonen
+legger et enklere, filtrert grensesnitt oppå HACS.
+
+## Funksjoner
+
+- Eget **Mine repoer**-panel i sidepanelet
+- Automatisk filtrering på GitHub-eier (standard: `isimagan`)
+- Status for installert og tilgjengelig HACS-versjon
+- Direkte kontroll mot siste GitHub Release, slik at panelet kan varsle når HACS
+  ennå ikke har oppdaget en ny release
+- **Oppdater informasjon** for ett repo eller alle repoer
+- Installering og oppdatering gjennom HACS/Home Assistants `update`-entiteter
+- Detaljside med README, versjoner og lenker til HACS og GitHub
+- Filtre for oppdateringer, integrasjoner og frontend-repoer
+
+## Krav
+
+- Home Assistant 2024.4.1 eller nyere
+- HACS 2.0 eller nyere
+- En administratorbruker (HACS sine WebSocket-kommandoer krever administrator)
+- Offentlige GitHub-repoer for den direkte release-kontrollen
+
+## Installering med HACS
+
+1. Åpne HACS.
+2. Velg menyen øverst til høyre og **Custom repositories**.
+3. Legg til `https://github.com/isimagan/HA-isimagan-repos` som **Integration**.
+4. Installer **Mine repoer** og start Home Assistant på nytt.
+5. Gå til **Innstillinger → Enheter og tjenester → Legg til integrasjon**.
+6. Søk etter **Mine repoer**, kontroller GitHub-eieren og fullfør oppsettet.
+
+Panelet vises deretter i sidepanelet. Bare repoer som HACS allerede kjenner til
+vises. Nye repoer dukker derfor opp når de blir lagt til i HACS eller HACS sitt
+standardregister.
+
+## Hvordan oppdatering virker
+
+**Oppdater informasjon** bruker HACS sin egen `hacs/repository/refresh`-kommando.
+Når en installert repository-oppdatering finnes, bruker panelet Home Assistants
+vanlige `update.install`-tjeneste. Hvis en update-entitet ikke finnes, faller
+panelet tilbake til HACS sin nedlastingskommando.
+
+Panelet spør i tillegg GitHubs offentlige API om siste publiserte release. Dette
+er kun en ekstra ferskhetskontroll; HACS er fortsatt ansvarlig for selve
+installasjonen. GitHub-svaret mellomlagres i nettleseren i ti minutter for å
+begrense API-kall.
+
+## Utvikling
+
+Integrasjonen har ingen byggetrinn eller tredjeparts frontend-avhengigheter.
+JavaScript-filen leveres direkte av Home Assistant fra
+`custom_components/mine_repoer/frontend/`.
+
+## Lisens
+
+[MIT](LICENSE)

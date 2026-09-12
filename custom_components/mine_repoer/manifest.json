@@ -1,0 +1,12 @@
+{
+  "domain": "mine_repoer",
+  "name": "Mine repoer",
+  "codeowners": ["@isimagan"],
+  "config_flow": true,
+  "documentation": "https://github.com/isimagan/HA-isimagan-repos",
+  "dependencies": ["frontend", "http"],
+  "after_dependencies": ["hacs"],
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "version": "0.1.0"
+}

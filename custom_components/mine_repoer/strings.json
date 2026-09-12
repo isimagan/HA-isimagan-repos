@@ -1,0 +1,17 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Mine repoer is already configured."
+    },
+    "step": {
+      "user": {
+        "title": "Set up Mine repoer",
+        "description": "Shows repositories from this GitHub owner that HACS knows about.",
+        "data": {
+          "owner": "GitHub owner",
+          "title": "Sidebar title"
+        }
+      }
+    }
+  }
+}
