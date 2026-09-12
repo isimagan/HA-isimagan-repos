@@ -51,13 +51,16 @@ const STYLE = `
   .other-repositories { margin-top: 34px; }
   .other-repositories > p { margin: 7px 0 16px; }
   .other-list { overflow: hidden; background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: var(--ha-card-border-radius, 12px); }
-  .other-row { display: flex; gap: 18px; align-items: center; justify-content: space-between; padding: 15px 17px; }
+  .other-header, .other-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(140px, .65fr) minmax(220px, 1fr); gap: 18px; align-items: center; padding: 15px 17px; }
+  .other-header { padding-top: 11px; padding-bottom: 11px; color: var(--secondary-text-color); background: var(--secondary-background-color); font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
   .other-row + .other-row { border-top: 1px solid var(--divider-color); }
   .other-main { flex: 1; min-width: 0; }
   .other-name { color: var(--primary-color); font-weight: 650; text-decoration: none; overflow-wrap: anywhere; }
   .other-name:hover { text-decoration: underline; }
-  .other-description { margin: 4px 0 0; font-size: 13px; line-height: 1.4; }
-  .other-status { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; align-items: center; }
+  .other-detail { min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
+  .other-detail.status { font-weight: 650; }
+  .other-detail.hacs { color: var(--secondary-text-color); font-size: 14px; }
+  .other-label { display: none; color: var(--secondary-text-color); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
   .error ha-icon { color: var(--error-color); }
   .progress { height: 3px; overflow: hidden; background: var(--divider-color); margin: -10px 0 20px; border-radius: 3px; }
   .progress span { display: block; height: 100%; background: var(--primary-color); transition: width .2s ease; }
@@ -99,8 +102,9 @@ const STYLE = `
     .detail-top { align-items: flex-start; }
     .restart-banner { align-items: flex-start; flex-wrap: wrap; }
     .restart-actions { width: 100%; }
-    .other-row { align-items: flex-start; flex-direction: column; }
-    .other-status { justify-content: flex-start; }
+    .other-header { display: none; }
+    .other-row { grid-template-columns: 1fr; gap: 10px; align-items: start; }
+    .other-label { display: block; margin-bottom: 2px; }
   }
 `;
 
@@ -126,6 +130,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._githubRepositoriesLoaded = false;
     this._githubRepositoriesError = undefined;
     this._githubRepositoriesFetchedAt = 0;
+    this._githubRepositoryContents = new Map();
     this._entityByRepository = new Map();
     this._checkedAt = new Map();
     this._filter = "all";
@@ -203,7 +208,10 @@ class MineRepositoriesPanel extends HTMLElement {
 
   async _loadGithubData(force = false) {
     await this._loadGithubRepositories(force);
-    await this._loadGithubReleases(force);
+    await Promise.all([
+      this._loadGithubRepositoryContents(force),
+      this._loadGithubReleases(force),
+    ]);
   }
 
   async _loadGithubRepositories(force = false) {
@@ -227,6 +235,34 @@ class MineRepositoriesPanel extends HTMLElement {
       this._githubRepositoriesFetchedAt = now;
       this._render();
     }
+  }
+
+  async _loadGithubRepositoryContents(force = false) {
+    const now = Date.now();
+    const repositories = this._otherRepositories().filter((repo) => Number(repo.size) > 0 && !repo.name.toLowerCase().endsWith(".github.io"));
+    await Promise.allSettled(repositories.map(async (repo) => {
+      const key = String(repo.full_name).toLowerCase();
+      const cached = this._githubRepositoryContents.get(key);
+      if (!force && cached && now - cached.fetchedAt < 10 * 60 * 1000) return;
+      try {
+        const path = encodeURIComponent(repo.full_name).replace("%2F", "/");
+        const response = await fetch(`https://api.github.com/repos/${path}/contents`, {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        });
+        if (!response.ok) throw new Error(`GitHub svarte ${response.status}`);
+        const contents = await response.json();
+        this._githubRepositoryContents.set(key, {
+          names: Array.isArray(contents) ? contents.map((entry) => String(entry.name).toLowerCase()) : [],
+          fetchedAt: now,
+        });
+      } catch (error) {
+        this._githubRepositoryContents.set(key, { error: this._friendlyError(error), fetchedAt: now });
+      }
+    }));
+    this._render();
   }
 
   async _loadGithubReleases(force = false) {
@@ -524,11 +560,6 @@ class MineRepositoriesPanel extends HTMLElement {
     return new Intl.DateTimeFormat("nb-NO", { hour: "2-digit", minute: "2-digit" }).format(date);
   }
 
-  _formatDate(value) {
-    if (!value) return "Ukjent";
-    return new Intl.DateTimeFormat("nb-NO", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
-  }
-
   _otherRepositories() {
     const boxed = new Set(this._repositories.map((repo) => String(repo.full_name).toLowerCase()));
     return this._githubRepositories
@@ -537,12 +568,24 @@ class MineRepositoriesPanel extends HTMLElement {
   }
 
   _otherRepositoryStatus(repo) {
-    if (repo.archived) return ["Arkivert", "warn"];
-    if (repo.disabled) return ["Deaktivert", "warn"];
-    if (Number(repo.size) === 0) return ["Tomt repo", ""];
+    if (repo.name.toLowerCase().endsWith(".github.io")) return { status: "Nettside", hacs: "Ikke relevant for HACS." };
+    if (repo.archived) return { status: "Arkivert", hacs: "Ikke aktivt vedlikeholdt." };
+    if (repo.disabled) return { status: "Deaktivert", hacs: "Ikke tilgjengelig for HACS." };
+    if (Number(repo.size) === 0) return { status: "Tomt repo", hacs: "Ikke en HACS-pakke ennå." };
+
+    const contents = this._githubRepositoryContents.get(String(repo.full_name).toLowerCase());
+    const names = contents?.names || [];
+    const hasPlan = names.some((name) => /^plan(?:\.|$)/.test(name));
+    const hasReadme = names.some((name) => /^readme(?:\.|$)/.test(name));
+    const hasHacs = names.includes("hacs.json");
+    if (hasPlan && hasReadme && !hasHacs) return { status: "README og plan", hacs: "Ikke en ferdig HACS-pakke ennå." };
+    if (hasPlan && !hasHacs) return { status: "Bare planfil", hacs: "Ikke en HACS-pakke ennå." };
+
     const release = this._github.get(repo.full_name);
-    if (release?.tag) return [`Release ${release.tag}`, "good"];
-    return ["Ingen release", ""];
+    if (hasHacs && release?.tag) return { status: `Release ${release.tag}`, hacs: "HACS-metadata og publisert release." };
+    if (hasHacs) return { status: "HACS-metadata", hacs: "Ingen publisert release." };
+    if (release?.tag) return { status: `Release ${release.tag}`, hacs: "Ingen HACS-metadata funnet." };
+    return { status: "Innhold finnes", hacs: "Ingen HACS-metadata funnet." };
   }
 
   _icon(category) {
@@ -696,6 +739,14 @@ class MineRepositoriesPanel extends HTMLElement {
 
     const list = document.createElement("div");
     list.className = "other-list";
+    const header = document.createElement("div");
+    header.className = "other-header";
+    for (const label of ["Repo", "Status", "HACS"]) {
+      const cell = document.createElement("span");
+      cell.textContent = label;
+      header.append(cell);
+    }
+    list.append(header);
     for (const repo of repositories) {
       const row = document.createElement("article");
       row.className = "other-row";
@@ -707,19 +758,22 @@ class MineRepositoriesPanel extends HTMLElement {
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       link.textContent = repo.name;
-      const repoDescription = document.createElement("p");
-      repoDescription.className = "other-description muted";
-      repoDescription.textContent = repo.description || "Ingen beskrivelse.";
-      main.append(link, repoDescription);
+      main.append(link);
 
+      const details = this._otherRepositoryStatus(repo);
       const status = document.createElement("div");
-      status.className = "other-status";
-      const [statusText, statusType] = this._otherRepositoryStatus(repo);
-      status.append(this._badge(statusText, statusType));
-      if (repo.fork) status.append(this._badge("Fork", "info"));
-      if (repo.language) status.append(this._badge(repo.language));
-      status.append(this._badge(`Pushet ${this._formatDate(repo.pushed_at)}`));
-      row.append(main, status);
+      status.className = "other-detail status";
+      const statusLabel = document.createElement("span");
+      statusLabel.className = "other-label";
+      statusLabel.textContent = "Status";
+      status.append(statusLabel, document.createTextNode(details.status));
+      const hacs = document.createElement("div");
+      hacs.className = "other-detail hacs";
+      const hacsLabel = document.createElement("span");
+      hacsLabel.className = "other-label";
+      hacsLabel.textContent = "HACS";
+      hacs.append(hacsLabel, document.createTextNode(details.hacs));
+      row.append(main, status, hacs);
       list.append(row);
     }
     section.append(list);
