@@ -48,6 +48,16 @@ const STYLE = `
   .card-actions { padding-top: 2px; }
   .card-actions button { min-height: 34px; padding: 7px 10px; font-size: 13px; }
   .empty, .error { padding: 38px 24px; text-align: center; border: 1px dashed var(--divider-color); border-radius: 14px; background: var(--card-background-color); }
+  .other-repositories { margin-top: 34px; }
+  .other-repositories > p { margin: 7px 0 16px; }
+  .other-list { overflow: hidden; background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: var(--ha-card-border-radius, 12px); }
+  .other-row { display: flex; gap: 18px; align-items: center; justify-content: space-between; padding: 15px 17px; }
+  .other-row + .other-row { border-top: 1px solid var(--divider-color); }
+  .other-main { flex: 1; min-width: 0; }
+  .other-name { color: var(--primary-color); font-weight: 650; text-decoration: none; overflow-wrap: anywhere; }
+  .other-name:hover { text-decoration: underline; }
+  .other-description { margin: 4px 0 0; font-size: 13px; line-height: 1.4; }
+  .other-status { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; align-items: center; }
   .error ha-icon { color: var(--error-color); }
   .progress { height: 3px; overflow: hidden; background: var(--divider-color); margin: -10px 0 20px; border-radius: 3px; }
   .progress span { display: block; height: 100%; background: var(--primary-color); transition: width .2s ease; }
@@ -89,6 +99,8 @@ const STYLE = `
     .detail-top { align-items: flex-start; }
     .restart-banner { align-items: flex-start; flex-wrap: wrap; }
     .restart-actions { width: 100%; }
+    .other-row { align-items: flex-start; flex-direction: column; }
+    .other-status { justify-content: flex-start; }
   }
 `;
 
@@ -110,6 +122,10 @@ class MineRepositoriesPanel extends HTMLElement {
     this._repositories = [];
     this._allRepositories = [];
     this._github = new Map();
+    this._githubRepositories = [];
+    this._githubRepositoriesLoaded = false;
+    this._githubRepositoriesError = undefined;
+    this._githubRepositoriesFetchedAt = 0;
     this._entityByRepository = new Map();
     this._checkedAt = new Map();
     this._filter = "all";
@@ -177,7 +193,7 @@ class MineRepositoriesPanel extends HTMLElement {
       this._restartIssues = (repairs.issues || []).filter((issue) => this._isRestartRequiredIssue(issue));
       this._loading = false;
       this._render();
-      await this._loadGithubReleases(refreshGithub);
+      await this._loadGithubData(refreshGithub);
     } catch (error) {
       this._loading = false;
       this._error = this._friendlyError(error);
@@ -185,9 +201,39 @@ class MineRepositoriesPanel extends HTMLElement {
     }
   }
 
+  async _loadGithubData(force = false) {
+    await this._loadGithubRepositories(force);
+    await this._loadGithubReleases(force);
+  }
+
+  async _loadGithubRepositories(force = false) {
+    const now = Date.now();
+    if (!force && this._githubRepositoriesLoaded && now - this._githubRepositoriesFetchedAt < 10 * 60 * 1000) return;
+    const owner = String(this._config.owner || "isimagan");
+    try {
+      const response = await fetch(`https://api.github.com/users/${encodeURIComponent(owner)}/repos?per_page=100&type=owner&sort=updated`, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
+      if (!response.ok) throw new Error(`GitHub svarte ${response.status}`);
+      this._githubRepositories = await response.json();
+      this._githubRepositoriesError = undefined;
+    } catch (error) {
+      this._githubRepositoriesError = this._friendlyError(error);
+    } finally {
+      this._githubRepositoriesLoaded = true;
+      this._githubRepositoriesFetchedAt = now;
+      this._render();
+    }
+  }
+
   async _loadGithubReleases(force = false) {
     const now = Date.now();
-    await Promise.allSettled(this._repositories.map(async (repo) => {
+    const repositories = new Map();
+    [...this._repositories, ...this._githubRepositories].forEach((repo) => repositories.set(String(repo.full_name).toLowerCase(), repo));
+    await Promise.allSettled([...repositories.values()].map(async (repo) => {
       const cached = this._github.get(repo.full_name);
       if (!force && cached && now - cached.fetchedAt < 10 * 60 * 1000) return;
       try {
@@ -478,6 +524,27 @@ class MineRepositoriesPanel extends HTMLElement {
     return new Intl.DateTimeFormat("nb-NO", { hour: "2-digit", minute: "2-digit" }).format(date);
   }
 
+  _formatDate(value) {
+    if (!value) return "Ukjent";
+    return new Intl.DateTimeFormat("nb-NO", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
+  }
+
+  _otherRepositories() {
+    const boxed = new Set(this._repositories.map((repo) => String(repo.full_name).toLowerCase()));
+    return this._githubRepositories
+      .filter((repo) => !boxed.has(String(repo.full_name).toLowerCase()))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "nb"));
+  }
+
+  _otherRepositoryStatus(repo) {
+    if (repo.archived) return ["Arkivert", "warn"];
+    if (repo.disabled) return ["Deaktivert", "warn"];
+    if (Number(repo.size) === 0) return ["Tomt repo", ""];
+    const release = this._github.get(repo.full_name);
+    if (release?.tag) return [`Release ${release.tag}`, "good"];
+    return ["Ingen release", ""];
+  }
+
   _icon(category) {
     return category === "plugin" ? "mdi:view-dashboard-outline" : category === "theme" ? "mdi:palette-outline" : "mdi:puzzle-outline";
   }
@@ -584,12 +651,79 @@ class MineRepositoriesPanel extends HTMLElement {
         ? "Ingen repoer passer dette filteret."
         : `HACS kjenner ikke til noen repoer fra ${this._config.owner || "isimagan"} ennå.`;
       page.append(empty);
-      return;
+    } else {
+      const grid = document.createElement("section");
+      grid.className = "grid";
+      repositories.forEach((repo) => grid.append(this._renderRepositoryCard(repo)));
+      page.append(grid);
     }
-    const grid = document.createElement("section");
-    grid.className = "grid";
-    repositories.forEach((repo) => grid.append(this._renderRepositoryCard(repo)));
-    page.append(grid);
+    page.append(this._renderOtherRepositories());
+  }
+
+  _renderOtherRepositories() {
+    const section = document.createElement("section");
+    section.className = "other-repositories";
+    const title = document.createElement("h2");
+    title.textContent = "Andre repoer";
+    const description = document.createElement("p");
+    description.className = "muted";
+    description.textContent = "GitHub-repoer som ikke vises i HACS-boksene over.";
+    section.append(title, description);
+
+    if (!this._githubRepositoriesLoaded) {
+      const loading = document.createElement("div");
+      loading.className = "empty muted";
+      loading.textContent = "Laster repoer fra GitHub …";
+      section.append(loading);
+      return section;
+    }
+    if (this._githubRepositoriesError) {
+      const error = document.createElement("div");
+      error.className = "error";
+      error.textContent = `Kunne ikke hente andre repoer: ${this._githubRepositoriesError}`;
+      section.append(error);
+      return section;
+    }
+
+    const repositories = this._otherRepositories();
+    if (!repositories.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty muted";
+      empty.textContent = "Ingen andre offentlige repoer funnet.";
+      section.append(empty);
+      return section;
+    }
+
+    const list = document.createElement("div");
+    list.className = "other-list";
+    for (const repo of repositories) {
+      const row = document.createElement("article");
+      row.className = "other-row";
+      const main = document.createElement("div");
+      main.className = "other-main";
+      const link = document.createElement("a");
+      link.className = "other-name";
+      link.href = repo.html_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = repo.name;
+      const repoDescription = document.createElement("p");
+      repoDescription.className = "other-description muted";
+      repoDescription.textContent = repo.description || "Ingen beskrivelse.";
+      main.append(link, repoDescription);
+
+      const status = document.createElement("div");
+      status.className = "other-status";
+      const [statusText, statusType] = this._otherRepositoryStatus(repo);
+      status.append(this._badge(statusText, statusType));
+      if (repo.fork) status.append(this._badge("Fork", "info"));
+      if (repo.language) status.append(this._badge(repo.language));
+      status.append(this._badge(`Pushet ${this._formatDate(repo.pushed_at)}`));
+      row.append(main, status);
+      list.append(row);
+    }
+    section.append(list);
+    return section;
   }
 
   _renderRestartBanner() {

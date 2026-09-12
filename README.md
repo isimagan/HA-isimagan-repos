@@ -16,6 +16,8 @@ legger et enklere, filtrert grensesnitt oppå HACS.
 - **Oppdater informasjon** for ett repo eller alle repoer
 - Installering og oppdatering gjennom HACS/Home Assistants `update`-entiteter
 - Detaljside med README, versjoner og lenker til HACS og GitHub
+- Liste over eierens øvrige offentlige GitHub-repoer med release-, innholds- og
+  aktivitetsstatus; repoer som vises i HACS-boksene utelates
 - Filtre for oppdateringer, integrasjoner og frontend-repoer
 - Registrering av tilpassede repoer i HACS, med valgfri direkte installasjon
 - Generelt varsel og omstartsknapp når Home Assistant Repairs melder at omstart kreves
