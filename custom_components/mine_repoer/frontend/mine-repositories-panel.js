@@ -45,6 +45,8 @@ const STYLE = `
   .badge.info { color: var(--info-color, var(--primary-color)); background: color-mix(in srgb, var(--primary-color) 13%, transparent); }
   .card-actions { padding-top: 2px; }
   .card-actions button { min-height: 34px; padding: 7px 10px; font-size: 13px; }
+  .release-usage { display: flex; flex-wrap: wrap; gap: 5px 12px; padding-top: 10px; border-top: 1px solid var(--divider-color); color: var(--secondary-text-color); font-size: 12px; line-height: 1.35; }
+  .release-usage strong { color: var(--primary-text-color); font-weight: 650; }
   .empty, .error { padding: 38px 24px; text-align: center; border: 1px dashed var(--divider-color); border-radius: 14px; background: var(--card-background-color); }
   .other-repositories { margin-top: 34px; }
   .other-repositories > p { margin: 7px 0 16px; }
@@ -224,6 +226,7 @@ class MineRepositoriesPanel extends HTMLElement {
       this._loadGithubRepositoryContents(force),
       this._loadGithubReleases(force),
     ]);
+    await this._loadGithubTags(force);
     this._saveGithubCache();
   }
 
@@ -337,19 +340,61 @@ class MineRepositoriesPanel extends HTMLElement {
           headers: { Accept: "application/vnd.github+json" },
         });
         if (response.status === 404) {
-          this._github.set(repo.full_name, { tag: null, fetchedAt: now });
+          this._github.set(repo.full_name, { ...cached, tag: null, releaseTag: null, error: undefined, fetchedAt: now });
           return;
         }
         if (!response.ok) throw new Error(`GitHub svarte ${response.status}`);
         const release = await response.json();
         this._github.set(repo.full_name, {
           tag: release.tag_name,
+          latestTag: release.tag_name,
+          releaseTag: release.tag_name,
           url: release.html_url,
           publishedAt: release.published_at,
           fetchedAt: now,
         });
       } catch (error) {
-        this._github.set(repo.full_name, { error: this._friendlyError(error), fetchedAt: now });
+        this._github.set(repo.full_name, { ...cached, error: this._friendlyError(error), fetchedAt: now });
+      }
+    }));
+    this._render();
+  }
+
+  async _loadGithubTags(force = false) {
+    const now = Date.now();
+    await Promise.allSettled(this._repositories.map(async (repo) => {
+      const current = this._github.get(repo.full_name) || {};
+      if (current.releaseTag || current.tag) {
+        this._github.set(repo.full_name, {
+          ...current,
+          latestTag: current.latestTag || current.releaseTag || current.tag,
+          tagsFetchedAt: now,
+        });
+        return;
+      }
+      if (!force && current.tagsFetchedAt && now - current.tagsFetchedAt < 10 * 60 * 1000) return;
+      try {
+        const path = encodeURIComponent(repo.full_name).replace("%2F", "/");
+        const response = await fetch(`https://api.github.com/repos/${path}/tags?per_page=1`, {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        });
+        if (!response.ok) throw new Error(`GitHub svarte ${response.status}`);
+        const tags = await response.json();
+        this._github.set(repo.full_name, {
+          ...current,
+          latestTag: Array.isArray(tags) ? tags[0]?.name || null : null,
+          tagError: undefined,
+          tagsFetchedAt: now,
+        });
+      } catch (error) {
+        this._github.set(repo.full_name, {
+          ...current,
+          tagError: this._friendlyError(error),
+          tagsFetchedAt: now,
+        });
       }
     }));
     this._render();
@@ -607,6 +652,17 @@ class MineRepositoriesPanel extends HTMLElement {
   }
 
   _normalVersion(version) { return String(version || "").trim().replace(/^v/i, ""); }
+
+  _releaseUsage(repo) {
+    const github = this._github.get(repo.full_name);
+    if (!github) return { tag: "Kontrollerer …", release: "Kontrollerer …" };
+    const tag = github.latestTag;
+    const release = github.releaseTag || github.tag;
+    return {
+      tag: tag ? `I bruk (${tag})` : github.tagError ? "Ukjent" : "Ikke i bruk",
+      release: release ? `I bruk (${release})` : github.error ? "Ukjent" : "Ikke i bruk",
+    };
+  }
 
   _formatTime(date) {
     if (!date) return "Ikke sjekket i denne økten";
@@ -907,7 +963,19 @@ class MineRepositoriesPanel extends HTMLElement {
     if (behind) {
       actions.append(this._button(`Installer GitHub ${github.tag}`, "install-github", { id: repo.id, version: github.tag, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
     }
-    card.append(head, description, badges, lastChecked, actions);
+    const usage = this._releaseUsage(repo);
+    const releaseUsage = document.createElement("div");
+    releaseUsage.className = "release-usage";
+    const tagStatus = document.createElement("span");
+    const tagLabel = document.createElement("strong");
+    tagLabel.textContent = "Tag: ";
+    tagStatus.append(tagLabel, document.createTextNode(usage.tag));
+    const releaseStatus = document.createElement("span");
+    const releaseLabel = document.createElement("strong");
+    releaseLabel.textContent = "Release: ";
+    releaseStatus.append(releaseLabel, document.createTextNode(usage.release));
+    releaseUsage.append(tagStatus, releaseStatus);
+    card.append(head, description, badges, lastChecked, actions, releaseUsage);
     return card;
   }
 
