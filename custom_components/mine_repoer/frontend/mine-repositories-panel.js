@@ -3,7 +3,6 @@ const STYLE = `
     display: block;
     min-height: 100%;
     color: var(--primary-text-color);
-    background: var(--primary-background-color);
     font-family: var(--paper-font-body1_-_font-family, system-ui, sans-serif);
   }
   * { box-sizing: border-box; }
