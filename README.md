@@ -1,8 +1,9 @@
 # Mine repoer
 
-Et privat utviklerpanel for Home Assistant som viser bare repoene dine i HACS.
-HACS fortsetter å håndtere installasjon, versjoner og oppdateringer; integrasjonen
-legger et enklere, filtrert grensesnitt oppå HACS.
+Et privat utviklerpanel for Home Assistant som viser bare repoene dine i
+Marketplace (Home Assistant 2026.11 og nyere) eller HACS (eldre versjoner).
+Marketplace/HACS fortsetter å håndtere installasjon, versjoner og oppdateringer;
+integrasjonen legger et enklere, filtrert grensesnitt oppå repository-behandleren.
 
 ## Funksjoner
 
@@ -26,8 +27,8 @@ legger et enklere, filtrert grensesnitt oppå HACS.
 ## Krav
 
 - Home Assistant 2024.4.1 eller nyere
-- HACS 2.0 eller nyere
-- En administratorbruker (HACS sine WebSocket-kommandoer krever administrator)
+- Home Assistant 2026.11 med Marketplace, eller HACS 2.0 på eldre Home Assistant
+- En administratorbruker (WebSocket-kommandoene krever administrator)
 - Offentlige GitHub-repoer for den direkte release-kontrollen
 
 ## Installering med HACS
@@ -51,16 +52,18 @@ valgt da integrasjonen ble satt opp.
 
 ## Hvordan oppdatering virker
 
-**Oppdater informasjon** bruker HACS sin egen `hacs/repository/refresh`-kommando.
+**Oppdater informasjon** bruker Marketplace sin
+`marketplace/repository/refresh`-kommando på Home Assistant 2026.11 og nyere,
+og `hacs/repository/refresh` på eldre installasjoner.
 Når en installert repository-oppdatering finnes, bruker panelet Home Assistants
 vanlige `update.install`-tjeneste. Hvis en update-entitet ikke finnes, faller
-panelet tilbake til HACS sin nedlastingskommando.
+panelet tilbake til Marketplace/HACS sin installasjonskommando.
 
 Panelet spør i tillegg GitHubs offentlige API om siste publiserte release. Når
 GitHub har en annen versjon enn HACS sitt register, vises knappen **Installer
-GitHub v…**. Den sender den eksplisitte GitHub-taggen til HACS sin egen
-nedlastingskommando, slik at HACS fortsatt står for installasjonen selv om det
-sentrale versjonsregisteret ligger etter. GitHub-svaret mellomlagres i
+GitHub v…**. Den sender den eksplisitte GitHub-taggen til Marketplace/HACS sin
+installasjonskommando, slik at repository-behandleren fortsatt står for
+installasjonen selv om det sentrale versjonsregisteret ligger etter. GitHub-svaret mellomlagres i
 nettleseren i ti minutter for å begrense API-kall.
 
 Oversikten over andre repoer lagres også i nettleseren. En full sideoppdatering
