@@ -6,7 +6,7 @@
     "step": {
       "user": {
         "title": "Set up Mine repoer",
-        "description": "Shows repositories from this GitHub owner that HACS knows about.",
+        "description": "Shows repositories from this GitHub owner that Marketplace or HACS knows about.",
         "data": {
           "owner": "GitHub owner",
           "title": "Sidebar title"

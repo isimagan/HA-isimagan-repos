@@ -1,7 +1,7 @@
 {
   "domain": "mine_repoer",
   "name": "Mine repoer",
-  "after_dependencies": ["hacs"],
+  "after_dependencies": ["hacs", "marketplace"],
   "codeowners": ["@isimagan"],
   "config_flow": true,
   "dependencies": ["frontend", "http"],
@@ -9,5 +9,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/isimagan/HA-isimagan-repos/issues",
-  "version": "0.6.4"
+  "version": "0.6.5"
 }

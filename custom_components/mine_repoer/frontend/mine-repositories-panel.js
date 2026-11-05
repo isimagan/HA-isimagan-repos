@@ -185,6 +185,18 @@ class MineRepositoriesPanel extends HTMLElement {
     return this._panel?.config || this._panel || {};
   }
 
+  get _repositoryManager() {
+    return this._hass?.config?.components?.includes("marketplace") ? "marketplace" : "hacs";
+  }
+
+  get _repositoryManagerName() {
+    return this._repositoryManager === "marketplace" ? "Marketplace" : "HACS";
+  }
+
+  _repositoryMessage(path, data = {}) {
+    return { type: `${this._repositoryManager}/${path}`, ...data };
+  }
+
   async _load({ refreshGithub = false } = {}) {
     if (!this._hass) return;
     this._loading = this._repositories.length === 0;
@@ -192,7 +204,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._render();
     try {
       const [repositories, registry, repairs] = await Promise.all([
-        this._hass.connection.sendMessagePromise({ type: "hacs/repositories/list" }),
+        this._hass.connection.sendMessagePromise(this._repositoryMessage("repositories/list")),
         this._hass.callWS({ type: "config/entity_registry/list" }).catch(() => []),
         this._hass.connection.sendMessagePromise({ type: "repairs/list_issues" }).catch(() => ({ issues: [] })),
       ]);
@@ -203,7 +215,7 @@ class MineRepositoriesPanel extends HTMLElement {
         .sort((a, b) => Number(b.pending_upgrade) - Number(a.pending_upgrade) || a.name.localeCompare(b.name, "nb"));
       this._entityByRepository = new Map(
         registry
-          .filter((entry) => entry.platform === "hacs" && entry.entity_id?.startsWith("update."))
+          .filter((entry) => entry.platform === this._repositoryManager && entry.entity_id?.startsWith("update."))
           .map((entry) => [String(entry.unique_id), entry.entity_id]),
       );
       this._restartIssues = (repairs.issues || []).filter((issue) => this._isRestartRequiredIssue(issue));
@@ -404,10 +416,9 @@ class MineRepositoriesPanel extends HTMLElement {
     this._detail = undefined;
     this._render();
     try {
-      this._detail = await this._hass.connection.sendMessagePromise({
-        type: "hacs/repository/info",
+      this._detail = await this._hass.connection.sendMessagePromise(this._repositoryMessage("repository/info", {
         repository_id: this._selected,
-      });
+      }));
     } catch (error) {
       this._selected = undefined;
       this._notify(this._friendlyError(error));
@@ -421,7 +432,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._busy.add(key);
     this._render();
     try {
-      await this._hass.connection.sendMessagePromise({ type: "hacs/repository/refresh", repository: key });
+      await this._hass.connection.sendMessagePromise(this._repositoryMessage("repository/refresh", { repository: key }));
       this._checkedAt.set(key, new Date());
       if (fullName) this._github.delete(fullName);
       await this._load();
@@ -443,7 +454,7 @@ class MineRepositoriesPanel extends HTMLElement {
     this._render();
     try {
       for (const repo of this._repositories) {
-        await this._hass.connection.sendMessagePromise({ type: "hacs/repository/refresh", repository: String(repo.id) });
+        await this._hass.connection.sendMessagePromise(this._repositoryMessage("repository/refresh", { repository: String(repo.id) }));
         this._checkedAt.set(String(repo.id), new Date());
         completed += 1;
         this._refreshProgress = { completed, total: this._repositories.length };
@@ -469,22 +480,26 @@ class MineRepositoriesPanel extends HTMLElement {
     try {
       const entityId = this._entityByRepository.get(key);
       if (version) {
-        await this._hass.connection.sendMessagePromise({
-          type: "hacs/repository/download",
+        await this._hass.connection.sendMessagePromise(this._repositoryMessage(
+          this._repositoryManager === "marketplace" ? "repository/install" : "repository/download",
+          {
           repository: key,
           version,
-        });
+          },
+        ));
       } else if (repo.installed && entityId) {
         await this._hass.callService("update", "install", {}, { entity_id: entityId });
       } else {
-        await this._hass.connection.sendMessagePromise({
-          type: "hacs/repository/download",
+        await this._hass.connection.sendMessagePromise(this._repositoryMessage(
+          this._repositoryManager === "marketplace" ? "repository/install" : "repository/download",
+          {
           repository: key,
           version: repo.available_version || undefined,
-        });
+          },
+        ));
       }
       this._notify(version
-        ? `GitHub-versjon ${version} er lastet ned gjennom HACS.`
+        ? `GitHub-versjon ${version} er installert gjennom ${this._repositoryManagerName}.`
         : repo.installed ? "Oppdateringen er lastet ned." : "Repository er installert.");
       await this._load();
       if (this._selected === key) await this._openDetail(key);
@@ -519,7 +534,7 @@ class MineRepositoriesPanel extends HTMLElement {
 
   async _waitForRepository(fullName) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      const repositories = await this._hass.connection.sendMessagePromise({ type: "hacs/repositories/list" });
+      const repositories = await this._hass.connection.sendMessagePromise(this._repositoryMessage("repositories/list"));
       const match = repositories.find((repo) => String(repo.full_name).toLowerCase() === fullName.toLowerCase());
       if (match) return match;
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -554,25 +569,26 @@ class MineRepositoriesPanel extends HTMLElement {
       let repository = this._allRepositories.find((repo) => String(repo.full_name).toLowerCase() === fullName.toLowerCase());
       const wasExisting = Boolean(repository);
       if (!repository) {
-        await this._hass.connection.sendMessagePromise({
-          type: "hacs/repositories/add",
+        await this._hass.connection.sendMessagePromise(this._repositoryMessage("repositories/add", {
           repository: fullName,
           category,
-        });
+        }));
         repository = await this._waitForRepository(fullName);
         if (!repository) {
-          throw new Error("HACS registrerte ikke repoet. Kontroller URL, repository-type og HACS-loggen.");
+          throw new Error(`${this._repositoryManagerName} registrerte ikke repoet. Kontroller URL og repository-type.`);
         }
       }
 
       if (install && !repository.installed) {
-        if (!repository.can_download) {
-          throw new Error("HACS registrerte repoet, men det kan ikke lastes ned ennå.");
+        if (!(repository.can_install ?? repository.can_download)) {
+          throw new Error(`${this._repositoryManagerName} registrerte repoet, men det kan ikke installeres ennå.`);
         }
-        await this._hass.connection.sendMessagePromise({
-          type: "hacs/repository/download",
+        await this._hass.connection.sendMessagePromise(this._repositoryMessage(
+          this._repositoryManager === "marketplace" ? "repository/install" : "repository/download",
+          {
           repository: String(repository.id),
-        });
+          },
+        ));
       }
 
       this._showAdd = false;
@@ -582,8 +598,8 @@ class MineRepositoriesPanel extends HTMLElement {
         install && !repository.installed
           ? `${fullName} er lagt til og installert.`
           : wasExisting
-            ? `${fullName} finnes allerede i HACS.`
-            : `${fullName} er lagt til i HACS.`,
+            ? `${fullName} finnes allerede i ${this._repositoryManagerName}.`
+            : `${fullName} er lagt til i ${this._repositoryManagerName}.`,
       );
     } catch (error) {
       this._addError = this._friendlyError(error);
@@ -625,7 +641,10 @@ class MineRepositoriesPanel extends HTMLElement {
   }
 
   _navigateHacs(id) {
-    history.pushState(null, "", `/hacs/repository/${id}`);
+    const path = this._repositoryManager === "marketplace"
+      ? `/marketplace/repository/${id}`
+      : `/hacs/repository/${id}`;
+    history.pushState(null, "", path);
     window.dispatchEvent(new CustomEvent("location-changed"));
   }
 
@@ -638,8 +657,8 @@ class MineRepositoriesPanel extends HTMLElement {
 
   _friendlyError(error) {
     const text = error?.message || error?.body?.message || String(error || "Ukjent feil");
-    if (text.includes("Unknown command") && text.includes("hacs/")) {
-      return "HACS er ikke startet eller er for gammel. Kontroller HACS og start Home Assistant på nytt.";
+    if (text.includes("Unknown command") && /(?:hacs|marketplace)\//.test(text)) {
+      return `${this._repositoryManagerName} er ikke startet. Kontroller integrasjonen og start Home Assistant på nytt.`;
     }
     return text;
   }
@@ -804,7 +823,7 @@ class MineRepositoriesPanel extends HTMLElement {
       empty.className = "empty";
       empty.textContent = this._repositories.length
         ? "Ingen repoer passer dette filteret."
-        : `HACS kjenner ikke til noen repoer fra ${this._config.owner || "isimagan"} ennå.`;
+        : `${this._repositoryManagerName} kjenner ikke til noen repoer fra ${this._config.owner || "isimagan"} ennå.`;
       page.append(empty);
     } else {
       const grid = document.createElement("section");
@@ -822,7 +841,7 @@ class MineRepositoriesPanel extends HTMLElement {
     title.textContent = "Andre repoer";
     const description = document.createElement("p");
     description.className = "muted";
-    description.textContent = "GitHub-repoer som ikke vises i HACS-boksene over.";
+    description.textContent = `GitHub-repoer som ikke vises i ${this._repositoryManagerName}-boksene over.`;
     section.append(title, description);
 
     if (!this._githubRepositoriesLoaded) {
@@ -853,7 +872,7 @@ class MineRepositoriesPanel extends HTMLElement {
     list.className = "other-list";
     const header = document.createElement("div");
     header.className = "other-header";
-    for (const label of ["Repo", "Status", "HACS"]) {
+    for (const label of ["Repo", "Status", this._repositoryManagerName]) {
       const cell = document.createElement("span");
       cell.textContent = label;
       header.append(cell);
@@ -883,7 +902,7 @@ class MineRepositoriesPanel extends HTMLElement {
       hacs.className = "other-detail hacs";
       const hacsLabel = document.createElement("span");
       hacsLabel.className = "other-label";
-      hacsLabel.textContent = "HACS";
+      hacsLabel.textContent = this._repositoryManagerName;
       hacs.append(hacsLabel, document.createTextNode(details.hacs));
       row.append(main, status, hacs);
       list.append(row);
@@ -945,7 +964,7 @@ class MineRepositoriesPanel extends HTMLElement {
     if (repo.pending_upgrade) badges.append(this._badge(`${repo.installed_version} → ${repo.available_version}`, "warn"));
     else if (repo.installed) badges.append(this._badge(`Installert ${repo.installed_version}`, "good"));
     else badges.append(this._badge("Ikke installert"));
-    if (behind) badges.append(this._badge(`GitHub ${github.tag} · HACS mangler release`, "warn"));
+    if (behind) badges.append(this._badge(`GitHub ${github.tag} · ${this._repositoryManagerName} mangler release`, "warn"));
     else if (github?.tag) badges.append(this._badge(`GitHub ${github.tag}`, "info"));
 
     const lastChecked = document.createElement("div");
@@ -1007,12 +1026,12 @@ class MineRepositoriesPanel extends HTMLElement {
     const status = document.createElement("div"); status.className = "badges";
     status.append(this._badge(CATEGORY_NAMES[repo.category] || repo.category));
     status.append(this._badge(repo.pending_upgrade ? "Oppdatering tilgjengelig" : repo.installed ? "Oppdatert" : "Ikke installert", repo.pending_upgrade ? "warn" : repo.installed ? "good" : ""));
-    if (this._hacsBehind(repo)) status.append(this._badge("HACS ligger bak GitHub", "warn"));
+    if (this._hacsBehind(repo)) status.append(this._badge(`${this._repositoryManagerName} ligger bak GitHub`, "warn"));
     const dl = document.createElement("dl");
     dl.className = "info-list";
     const rows = [
       ["Installert", repo.installed_version || "–"],
-      ["HACS", repo.available_version || "–"],
+      [this._repositoryManagerName, repo.available_version || "–"],
       ["GitHub", this._github.get(repo.full_name)?.tag || "Ingen release"],
       ["Gren", repo.default_branch || "–"],
       ["Sist sjekket", this._formatTime(this._checkedAt.get(String(repo.id)))],
@@ -1028,7 +1047,7 @@ class MineRepositoriesPanel extends HTMLElement {
     if (repo.pending_upgrade || !repo.installed) actions.append(this._button(repo.installed ? "Oppdater" : "Installer", "install", { id: repo.id, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
     const github = this._github.get(repo.full_name);
     if (this._hacsBehind(repo)) actions.append(this._button(`Installer GitHub ${github.tag}`, "install-github", { id: repo.id, version: github.tag, className: "tonal", disabled: this._busy.has(String(repo.id)) }));
-    actions.append(this._button("Åpne i HACS", "hacs", { id: repo.id }));
+    actions.append(this._button(`Åpne i ${this._repositoryManagerName}`, "hacs", { id: repo.id }));
     const githubLink = document.createElement("a");
     githubLink.className = "button";
     githubLink.href = `https://github.com/${repo.full_name}`;
@@ -1042,7 +1061,7 @@ class MineRepositoriesPanel extends HTMLElement {
     readme.className = "readme";
     const heading = document.createElement("h2"); heading.textContent = "README";
     const markdown = document.createElement("ha-markdown");
-    markdown.content = repo.additional_info || "_Dette repositoryet har ingen README som HACS kan vise._";
+    markdown.content = repo.additional_info || `_Dette repositoryet har ingen README som ${this._repositoryManagerName} kan vise._`;
     markdown.breaks = true;
     readme.append(heading, markdown);
     grid.append(info, readme);
@@ -1067,7 +1086,7 @@ class MineRepositoriesPanel extends HTMLElement {
     dialog.setAttribute("aria-labelledby", "add-repository-title");
     const title = document.createElement("h2");
     title.id = "add-repository-title";
-    title.textContent = "Legg til repo i HACS";
+    title.textContent = `Legg til repo i ${this._repositoryManagerName}`;
     const description = document.createElement("p");
     description.className = "muted";
     description.textContent = `Registrer et tilpasset repo fra ${this._config.owner || "isimagan"}, og installer det med én gang hvis du ønsker.`;
