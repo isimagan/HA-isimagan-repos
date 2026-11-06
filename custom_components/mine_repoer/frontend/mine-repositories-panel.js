@@ -474,6 +474,10 @@ class MineRepositoriesPanel extends HTMLElement {
   async _install(id, version) {
     const repo = this._repositories.find((item) => String(item.id) === String(id)) || this._detail;
     if (!repo) return;
+    if (version && (version !== this._github.get(repo.full_name)?.tag || !this._hacsBehind(repo))) {
+      this._notify("Ingen bekreftet nyere GitHub-release. Oppdater informasjon før du prøver igjen.");
+      return;
+    }
     const key = String(repo.id);
     this._busy.add(key);
     this._render();
@@ -664,9 +668,51 @@ class MineRepositoriesPanel extends HTMLElement {
   }
 
   _hacsBehind(repo) {
+    return this._githubVersionStatus(repo) === "update";
+  }
+
+  _githubVersionStatus(repo) {
     const github = this._github.get(repo.full_name);
-    if (!github?.tag || !repo.available_version) return false;
-    return this._normalVersion(github.tag) !== this._normalVersion(repo.available_version);
+    if (!github?.tag) return "none";
+    if (github.error) return "unknown";
+    const installed = repo.installed
+      ? this._compareVersions(github.tag, repo.installed_version)
+      : undefined;
+    // A stale manager catalogue must not offer a reinstall or downgrade.
+    if (installed !== undefined && installed !== null && installed <= 0) return "current";
+    const available = this._compareVersions(github.tag, repo.available_version);
+    if (available !== null && available <= 0) return "known";
+    // Branches, commit hashes and missing versions have no numeric ordering.
+    if (available === null || installed === null) return "unknown";
+    return "update";
+  }
+
+  _compareVersions(left, right) {
+    const parse = (value) => {
+      const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(this._normalVersion(value));
+      if (!match) return null;
+      const pre = match[4]?.split(".") || [];
+      if (pre.some((part) => /^0\d+$/.test(part))) return null;
+      return { core: match.slice(1, 4).map(BigInt), pre };
+    };
+    const a = parse(left);
+    const b = parse(right);
+    if (!a || !b) return null;
+    for (let i = 0; i < 3; i += 1) {
+      if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i] ? 1 : -1;
+    }
+    if (!a.pre.length || !b.pre.length) return a.pre.length === b.pre.length ? 0 : a.pre.length ? -1 : 1;
+    for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i += 1) {
+      if (a.pre[i] === b.pre[i]) continue;
+      if (a.pre[i] === undefined) return -1;
+      if (b.pre[i] === undefined) return 1;
+      const aNumeric = /^\d+$/.test(a.pre[i]);
+      const bNumeric = /^\d+$/.test(b.pre[i]);
+      if (aNumeric && bNumeric) return BigInt(a.pre[i]) > BigInt(b.pre[i]) ? 1 : -1;
+      if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+      return a.pre[i] > b.pre[i] ? 1 : -1;
+    }
+    return 0;
   }
 
   _normalVersion(version) { return String(version || "").trim().replace(/^v/i, ""); }
@@ -964,7 +1010,8 @@ class MineRepositoriesPanel extends HTMLElement {
     if (repo.pending_upgrade) badges.append(this._badge(`${repo.installed_version} → ${repo.available_version}`, "warn"));
     else if (repo.installed) badges.append(this._badge(`Installert ${repo.installed_version}`, "good"));
     else badges.append(this._badge("Ikke installert"));
-    if (behind) badges.append(this._badge(`GitHub ${github.tag} · ${this._repositoryManagerName} mangler release`, "warn"));
+    if (behind) badges.append(this._badge(`Nyere GitHub-release ${github.tag}`, "warn"));
+    else if (github?.tag && this._githubVersionStatus(repo) === "unknown") badges.append(this._badge(`GitHub ${github.tag} · Versjoner ikke avklart`, "info"));
     else if (github?.tag) badges.append(this._badge(`GitHub ${github.tag}`, "info"));
 
     const lastChecked = document.createElement("div");
@@ -1026,7 +1073,8 @@ class MineRepositoriesPanel extends HTMLElement {
     const status = document.createElement("div"); status.className = "badges";
     status.append(this._badge(CATEGORY_NAMES[repo.category] || repo.category));
     status.append(this._badge(repo.pending_upgrade ? "Oppdatering tilgjengelig" : repo.installed ? "Oppdatert" : "Ikke installert", repo.pending_upgrade ? "warn" : repo.installed ? "good" : ""));
-    if (this._hacsBehind(repo)) status.append(this._badge(`${this._repositoryManagerName} ligger bak GitHub`, "warn"));
+    if (this._hacsBehind(repo)) status.append(this._badge("Nyere GitHub-release tilgjengelig", "warn"));
+    else if (this._githubVersionStatus(repo) === "unknown") status.append(this._badge("GitHub-versjon kan ikke sammenlignes", "info"));
     const dl = document.createElement("dl");
     dl.className = "info-list";
     const rows = [

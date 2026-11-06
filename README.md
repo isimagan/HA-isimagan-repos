@@ -60,8 +60,14 @@ vanlige `update.install`-tjeneste. Hvis en update-entitet ikke finnes, faller
 panelet tilbake til Marketplace/HACS sin installasjonskommando.
 
 Panelet spør i tillegg GitHubs offentlige API om siste publiserte release. Når
-GitHub har en annen versjon enn HACS sitt register, vises knappen **Installer
-GitHub v…**. Den sender den eksplisitte GitHub-taggen til Marketplace/HACS sin
+GitHub har en bekreftet nyere versjon enn både Marketplace/HACS sitt register
+og installert versjon (hvis repoet er installert), vises knappen **Installer
+GitHub v…**. Sammenligningen bruker semantiske versjonsnumre, inkludert
+forhåndsversjoner; `v`-prefiks og byggmetadata endrer ikke versjonsrekkefølgen.
+Grennavn, commit-hasher og manglende versjonsopplysninger regnes som ukjente,
+ikke som manglende releaser. Da vises en nøytral status uten GitHub-installasjonsknapp.
+En allerede installert eller eldre GitHub-release tilbys ikke på nytt.
+Den sender den eksplisitte GitHub-taggen til Marketplace/HACS sin
 installasjonskommando, slik at repository-behandleren fortsatt står for
 installasjonen selv om det sentrale versjonsregisteret ligger etter. GitHub-svaret mellomlagres i
 nettleseren i ti minutter for å begrense API-kall.

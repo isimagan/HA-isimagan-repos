@@ -10,6 +10,15 @@ on:
 permissions: {}
 
 jobs:
+  test-frontend:
+    name: Frontend regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Test release status
+        run: node --test tests/*.test.cjs
+
   validate-hacs:
     name: HACS
     runs-on: ubuntu-latest
